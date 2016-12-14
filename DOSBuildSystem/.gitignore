@@ -1,0 +1,9 @@
+dos.sh
+TURBOC*
+dosroot/TC
+dosroot/BUILD.BAT
+DOSBox.app
+.DS_Store
+*.MAP
+*.OBJ
+*.EXE
