@@ -22,9 +22,9 @@ char far *crit_err_ptr = 0;
 
 int timecount = 0;
 int TL;
-int current = -1;
+int current_pid = -1;
 int n = 0;
-int swtchtcb = 1; // use as semaphore when doing communication
+int swtchtcb = 1; // used as semaphore to decide swtch
 
 typedef int(far *codeptr)(void);
 void interrupt (*old_int8)(void);
@@ -64,7 +64,6 @@ struct int_regs {
 };
 
 int intbuf[NBUF], buftemp;
-int in = 0, out = 0;
 
 void over();
 void destroy(int id);
@@ -171,22 +170,22 @@ void f5() {
 }
 
 void prdc() {
-    int tmp, i;
+    int tmp, i, in = 0;
     for (i = 1; i <= 10; i++) {
         tmp = i * i;
-        printf("prdc %d\n", tmp);
         wait(&empty);
         wait(&mutex);
         intbuf[in] = tmp;
         in = (in + 1) % NBUF;
 
+        printf("prdc %d\n", tmp);
         signal(&mutex);
         signal(&full);
     }
 }
 
 void cnsm() {
-    int tmp, i;
+    int tmp, i, out = 0;
     for (i = 1; i <= 10; i++) {
         wait(&full);
         wait(&mutex);
@@ -195,7 +194,7 @@ void cnsm() {
 
         signal(&mutex);
         signal(&empty);
-        printf("Out %d: %d\n", i, tmp);
+        printf("Out %d\n", i, tmp);
         sleep(2);
     }
 }
@@ -206,7 +205,7 @@ void sender(void) {
     for (i = 0; i < 10; i++) {
         strcpy(a, "message");
         a[7] = '0' + i;
-        a[8] = 0;
+        a[8] = '\0';
         send("receiver", a, strlen(a));
         printf("sender:Message \"%s\"  has been sent\n", a);
     }
@@ -275,22 +274,22 @@ void interrupt swtch() {
         return;
     }
 
-    tcb[current].ss = _SS;
-    tcb[current].sp = _SP;
+    tcb[current_pid].ss = _SS;
+    tcb[current_pid].sp = _SP;
 
-    if (tcb[current].state == RUNNING)
-        tcb[current].state = READY;
+    if (tcb[current_pid].state == RUNNING)
+        tcb[current_pid].state = READY;
 
-    while (tcb[++current].state != READY && loop++ < NTCB - 1)
-        if (current == NTCB)
-            current = 0;
+    while (tcb[++current_pid].state != READY && loop++ < NTCB - 1)
+        if (current_pid == NTCB)
+            current_pid = 0;
 
-    if (tcb[current].state != READY)
-        current = 0;
-    _SS = tcb[current].ss;
-    _SP = tcb[current].sp;
+    if (tcb[current_pid].state != READY)
+        current_pid = 0;
+    _SS = tcb[current_pid].ss;
+    _SP = tcb[current_pid].sp;
 
-    tcb[current].state = RUNNING;
+    tcb[current_pid].state = RUNNING;
 
     timecount = 0;
 
@@ -307,7 +306,7 @@ void destroy(int id) {
 }
 
 void over() {
-    destroy(current);
+    destroy(current_pid);
     swtch();
 }
 
@@ -371,12 +370,12 @@ void block(struct TCB **qp) {
     int id;
     struct TCB *tcbtmp;
 
-    id = current;
+    id = current_pid;
     tcb[id].state = BLOCKED;
 
-    if ((*qp) == NULL)
+    if ((*qp) == NULL) {
         (*qp) = &tcb[id];
-    else {
+    } else {
         tcbtmp = *qp;
         while (tcbtmp->next != NULL)
             tcbtmp = tcbtmp->next;
@@ -384,7 +383,6 @@ void block(struct TCB **qp) {
     }
 
     tcb[id].next = NULL;
-    swtch();
 }
 
 void wakeupFirst(struct TCB **qp) {
@@ -417,12 +415,13 @@ struct buffer *getbuf() {
 
 void insert(struct buffer **mq, struct buffer *buff) {
     struct buffer *temp;
-    if (buff == NULL)
+    if (buff == NULL) {
         return;
+    }
     buff->next = NULL;
-    if (*mq == NULL)
+    if (*mq == NULL) {
         *mq = buff;
-    else {
+    } else {
         temp = *mq;
         while (temp->next != NULL)
             temp = temp->next;
@@ -434,7 +433,7 @@ void send(char *receiver, char *a, int size) {
     struct buffer *buff;
     int i, id = -1;
 
-    swtchtcb--; // 相等于disable()
+    swtchtcb--; // stop swtch to other thread
     for (i = 0; i < NTCB; i++) {
         if (strcmp(receiver, tcb[i].name) == 0) {
             id = i;
@@ -451,7 +450,7 @@ void send(char *receiver, char *a, int size) {
     buff = getbuf();
     signal(&mutexfb);
 
-    buff->id = current;
+    buff->id = current_pid;
     buff->size = size;
     buff->next = NULL;
     strcpy(buff->text, a);
@@ -506,13 +505,13 @@ int receive(char *sender, char *b) {
         return -1;
     }
 again:
-    wait(&tcb[current].sm);
-    wait(&tcb[current].mutex);
-    buff = remov(&(tcb[current].mq), id);
-    signal(&tcb[current].mutex);
+    wait(&tcb[current_pid].sm);
+    wait(&tcb[current_pid].mutex);
+    buff = remov(&(tcb[current_pid].mq), id);
+    signal(&tcb[current_pid].mutex);
     if (buff == NULL) {
-        signal(&tcb[current].sm);
-        tcb[current].state = BLOCKED;
+        signal(&tcb[current_pid].sm);
+        tcb[current_pid].state = BLOCKED;
         swtchtcb++;
         swtch();
         goto again;
@@ -536,66 +535,21 @@ void main() {
     old_int8 = getvect(8);
     strcpy(tcb[0].name, "main");
     tcb[0].state = RUNNING;
-    current = 0;
+    current_pid = 0;
 
     while (select != 0) {
         do {
             clrscr();
             printf("0. Exit\n");
-            printf("1. First come first serve\n");
-            printf("2. Time slice\n");
-            printf("3. Change TL, see what would change\n");
-            printf("4. Exclusively assess\n");
-            printf("5. Producer and consumer SYNC problem\n");
-            printf("6. Message buffer communication\n");
+            printf("1. Exclusively assess\n");
+            printf("2. Producer and consumer SYNC problem\n");
+            printf("3. Message buffer communication\n");
             scanf("%d", &select);
         } while (select < 0 || select > 7);
 
         switch (select) {
+
         case 1:
-            create("f1", (codeptr)f1, NSTACK);
-            create("f2", (codeptr)f2, NSTACK);
-            clrscr();
-            printf("\ncreate f1 and f2\n");
-            printf("f1 prints 1000 a\n");
-            printf("f2 prints 100 b\n");
-            swtch();
-            getch();
-            break;
-        case 2:
-            TL = 1;
-            printf("Time slice = 1\n\n");
-            getch();
-            create("f1", (codeptr)f1, NSTACK);
-            create("f2", (codeptr)f2, NSTACK);
-            create("f3", (codeptr)f3, NSTACK);
-            clrscr();
-            printf("\ncreate f1, f2, f3\n");
-            printf("f1 prints 1000 a\n");
-            printf("f2 prints 100 b\n");
-            printf("f3 prints 1000 c\n");
-            setvect(8, new_int8);
-            swtch();
-            getch();
-            break;
-        case 3:
-            printf("Enter new time slice: ");
-            scanf("%d", &TL);
-            printf("Time slice = %d\n\n", TL);
-            getch();
-            create("f1", (codeptr)f1, NSTACK);
-            create("f2", (codeptr)f2, NSTACK);
-            create("f3", (codeptr)f3, NSTACK);
-            clrscr();
-            printf("\ncreate f1, f2, f3\n");
-            printf("f1 prints 1000 a\n");
-            printf("f2 prints 100 b\n");
-            printf("f3 prints 1000 c\n");
-            setvect(8, new_int8);
-            swtch();
-            getch();
-            break;
-        case 4:
             n = 0;
             TL = 1;
             create("f4", (codeptr)f4, NSTACK);
@@ -607,9 +561,8 @@ void main() {
             swtch();
             getch();
             break;
-        case 5:
+        case 2:
             TL = 4;
-
             create("prdc", (codeptr)prdc, NSTACK);
             create("cnsm", (codeptr)cnsm, NSTACK);
             printf("prdc\n");
@@ -619,7 +572,7 @@ void main() {
             swtch();
             getch();
             break;
-        case 6:
+        case 3:
             initBuf();
             create("sender", (codeptr)sender, NSTACK);
             create("receiver", (codeptr)receiver, NSTACK);
