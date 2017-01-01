@@ -203,7 +203,6 @@ void cnsm() {
 void sender(void) {
     int i, j;
     char a[10];
-loop:
     for (i = 0; i < 10; i++) {
         strcpy(a, "message");
         a[7] = '0' + i;
@@ -211,14 +210,11 @@ loop:
         send("receiver", a, strlen(a));
         printf("sender:Message \"%s\"  has been sent\n", a);
     }
-    // printf("%s\n", a);
     receive("receiver", a);
-    printf("%s\n", a);
-    if (strcmp(a, "ok") != 0) {
-        printf("Not be committed, Message should be resended!\n");
-        // goto loop;
+    if (strcmp(a, "ok") == 0) {
+        printf("Sender heard \"ok\" from receiver.\n");
     } else
-        printf("Committed, Communication is finished!\n");
+        printf("Something bad happened.\n");
 }
 
 void receiver(void) {
@@ -233,8 +229,8 @@ void receiver(void) {
             putchar(b[j]);
         printf("\n");
     }
-    strcpy(b, "ok");
-    send("sender", b, 3);
+    printf("Receiver tells sender \"ok\"\n");
+    send("sender", "ok", 3);
 }
 
 int create(char *name, codeptr code, int stck) {
@@ -453,7 +449,6 @@ void send(char *receiver, char *a, int size) {
     wait(&sfb);
     wait(&mutexfb);
     buff = getbuf();
-    printf("Get message buffer at %p\n", buff);
     signal(&mutexfb);
 
     buff->id = current;
@@ -514,7 +509,6 @@ again:
     wait(&tcb[current].sm);
     wait(&tcb[current].mutex);
     buff = remov(&(tcb[current].mq), id);
-    printf("Found message buffer %p\n", buff);
     signal(&tcb[current].mutex);
     if (buff == NULL) {
         signal(&tcb[current].sm);
