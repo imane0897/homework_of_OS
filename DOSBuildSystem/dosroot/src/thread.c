@@ -11,7 +11,7 @@
 
 #define NTCB 10
 #define NTEXT 20
-#define NBUF 20
+#define NBUF 200
 #define NSTACK 1024
 
 #define GET_INDOS 0x34
@@ -154,7 +154,6 @@ void f4() {
         n++;
         printf(" %d", n);
         signal(&mutex);
-        sleep(1);
     }
 }
 
@@ -165,28 +164,28 @@ void f5() {
         n--;
         printf(" %d ", n);
         signal(&mutex);
-        sleep(1);
     }
 }
 
 void prdc() {
     int tmp, i, in = 0;
-    for (i = 1; i <= 10; i++) {
+    for (i = 1; i <= 100; i++) {
         tmp = i * i;
         wait(&empty);
         wait(&mutex);
         intbuf[in] = tmp;
         in = (in + 1) % NBUF;
 
-        printf("prdc %d\n", tmp);
+        printf("In %d\n", tmp);
         signal(&mutex);
         signal(&full);
+        sleep(1);
     }
 }
 
 void cnsm() {
     int tmp, i, out = 0;
-    for (i = 1; i <= 10; i++) {
+    for (i = 1; i <= 100; i++) {
         wait(&full);
         wait(&mutex);
         tmp = intbuf[out];
@@ -194,8 +193,8 @@ void cnsm() {
 
         signal(&mutex);
         signal(&empty);
-        printf("Out %d\n", i, tmp);
-        sleep(2);
+        printf("Out %d %d\n", i, tmp);
+        sleep(1);
     }
 }
 
@@ -433,7 +432,6 @@ void send(char *receiver, char *a, int size) {
     struct buffer *buff;
     int i, id = -1;
 
-    swtchtcb--; // stop swtch to other thread
     for (i = 0; i < NTCB; i++) {
         if (strcmp(receiver, tcb[i].name) == 0) {
             id = i;
@@ -464,8 +462,6 @@ void send(char *receiver, char *a, int size) {
     if (tcb[id].state == BLOCKED) {
         tcb[id].state = READY;
     }
-
-    swtchtcb++;
 }
 
 struct buffer *remov(struct buffer **mq, int sender) {
@@ -492,7 +488,6 @@ int receive(char *sender, char *b) {
     int i, id = -1;
     struct buffer *buff;
 
-    swtchtcb--;
     for (i = 0; i < NTCB; i++) {
         if (strcmp(sender, tcb[i].name) == 0) {
             id = i;
@@ -522,7 +517,6 @@ again:
     signal(&mutexfb);
     signal(&sfb);
 
-    swtchtcb++;
     return buff->size;
 }
 
@@ -562,7 +556,7 @@ void main() {
             getch();
             break;
         case 2:
-            TL = 4;
+            TL = 1;
             create("prdc", (codeptr)prdc, NSTACK);
             create("cnsm", (codeptr)cnsm, NSTACK);
             printf("prdc\n");
